@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ทันเวลา · ศูนย์ควบคุมอุปกรณ์</title>
+<meta name="description" content="แดชบอร์ดตรวจสอบและควบคุมอุปกรณ์ ESP32 ผ่าน MQTT">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{
+  --bg:#f3f6fa; --surface:#ffffff; --surface2:#f7f9fc; --line:#dde4ee;
+  --text:#14213d; --muted:#5d6b82; --brand:#0b3a6f; --brand2:#1363b5;
+  --ok:#14804a; --okbg:#e3f5ec; --bad:#b42318; --badbg:#fdeceb; --warn:#a15c07; --warnbg:#fdf3e1;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06);
+  --radius:14px;
+}
+:root[data-theme="dark"]{
+  --bg:#0b1220; --surface:#121c30; --surface2:#162239; --line:#25334f;
+  --text:#e8eefb; --muted:#93a3c0; --brand:#7db4ff; --brand2:#4d92f0;
+  --ok:#4ade80; --okbg:#10301f; --bad:#ff8a80; --badbg:#3a1714; --warn:#f5b951; --warnbg:#35280d;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b1220; --surface:#121c30; --surface2:#162239; --line:#25334f;
+    --text:#e8eefb; --muted:#93a3c0; --brand:#7db4ff; --brand2:#4d92f0;
+    --ok:#4ade80; --okbg:#10301f; --bad:#ff8a80; --badbg:#3a1714; --warn:#f5b951; --warnbg:#35280d;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+  }
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:'Sarabun',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+
+/* header */
+header{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+.bar{display:flex;align-items:center;gap:14px;height:68px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.logo{width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:grid;place-items:center;flex:none}
+.logo svg{width:22px;height:22px;stroke:#fff}
+.brand h1{font-size:18px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.brand p{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spacer{flex:1}
+.badge{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface2);color:var(--muted);white-space:nowrap}
+.badge i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.badge.ok{color:var(--ok);background:var(--okbg);border-color:transparent}
+.badge.bad{color:var(--bad);background:var(--badbg);border-color:transparent}
+.badge.warn{color:var(--warn);background:var(--warnbg);border-color:transparent}
+.badge.ok i{animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.icon-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:600;color:var(--text)}
+.icon-btn:hover{background:var(--surface2)}
+.icon-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* layout */
+main{padding:26px 0 40px;display:grid;gap:18px;grid-template-columns:repeat(12,1fr)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+.card h2{font-size:15px;font-weight:600;color:var(--muted);letter-spacing:.3px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.c12{grid-column:span 12}.c8{grid-column:span 8}.c7{grid-column:span 7}.c5{grid-column:span 5}.c4{grid-column:span 4}.c6{grid-column:span 6}
+@media(max-width:860px){.c8,.c7,.c5,.c4,.c6{grid-column:span 12}}
+
+/* overview */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.stat small{display:block;color:var(--muted);font-size:12.5px;margin-bottom:4px}
+.stat b{font-size:22px;font-weight:600;display:block;line-height:1.25}
+.stat b.on{color:var(--ok)}.stat b.off{color:var(--muted)}
+
+/* controls */
+.ctrl{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:1px solid var(--line)}
+.ctrl:last-of-type{border-bottom:0}
+.ctrl h3{font-size:16px;font-weight:600}
+.ctrl p{font-size:13px;color:var(--muted)}
+.switch{position:relative;width:58px;height:32px;flex:none}
+.switch input{position:absolute;opacity:0;inset:0;cursor:pointer;z-index:2;margin:0;width:100%;height:100%}
+.switch span{position:absolute;inset:0;border-radius:999px;background:#b9c3d3;transition:.2s}
+.switch span::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.switch input:checked+span{background:var(--ok)}
+.switch input:checked+span::after{transform:translateX(26px)}
+.switch input:focus-visible+span{outline:3px solid var(--brand2);outline-offset:2px}
+.switch input:disabled{cursor:not-allowed}.switch input:disabled+span{opacity:.5}
+.btn-row{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
+.btn{padding:10px 18px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:500;font-size:14.5px}
+.btn:hover{background:var(--surface2)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+:root[data-theme="dark"] .btn.primary{color:#0b1220}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:6px 12px;font-size:13px}
+.btn:focus-visible,.icon-btn:focus-visible{outline:3px solid var(--brand2);outline-offset:2px}
+
+/* signal */
+.sig{display:flex;align-items:flex-end;gap:5px;height:34px}
+.sig i{width:8px;border-radius:2px;background:var(--line)}
+.sig i:nth-child(1){height:25%}.sig i:nth-child(2){height:50%}.sig i:nth-child(3){height:75%}.sig i:nth-child(4){height:100%}
+.sig i.f{background:var(--brand2)}
+.sigtop{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.sigtop b{font-size:30px;font-weight:600}.sigtop span{color:var(--muted);font-size:13.5px}
+.spark{width:100%;height:70px;margin-top:12px;display:block}
+.spark polyline{fill:none;stroke:var(--brand2);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.spark path{fill:var(--brand2);opacity:.12}
+.spark line{stroke:var(--line);stroke-dasharray:3 4}
+
+/* log */
+.log{list-style:none;padding:0;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
+.log li{display:flex;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:14px}
+.log li:last-child{border-bottom:0}
+.log time{color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+.empty{padding:22px;text-align:center;color:var(--muted);font-size:14px}
+.tools{display:flex;gap:8px}
+
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--text);padding:0;width:min(460px,92vw);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(8,14,28,.55)}
+dialog form{padding:24px;display:grid;gap:14px}
+dialog h3{font-size:18px}
+.field{display:grid;gap:5px}
+.field label{font-size:13px;color:var(--muted);font-weight:500}
+.field input[type=text],.field input[type=password],.field input[type=url]{padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface2);width:100%}
+.field input:focus{outline:2px solid var(--brand2);border-color:transparent}
+.field small{font-size:12px;color:var(--muted)}
+.check{display:flex;align-items:center;gap:10px;font-size:14.5px}
+.check input{width:18px;height:18px;accent-color:var(--brand2)}
+.actions{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+.err{color:var(--bad);font-size:13px;min-height:18px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,30px);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:50}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+footer{border-top:1px solid var(--line);padding:18px 0 28px;color:var(--muted);font-size:12.5px;text-align:center}
+.notice{background:var(--warnbg);color:var(--warn);border-radius:10px;padding:10px 14px;font-size:13px;margin-top:12px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+      <div><h1 data-i18n="title"></h1><p data-i18n="subtitle"></p></div>
+    </div>
+    <div class="spacer"></div>
+    <span class="badge" id="connBadge"><i></i><span id="connText"></span></span>
+    <button class="icon-btn" id="langBtn" title="Language">EN</button>
+    <button class="icon-btn" id="themeBtn" aria-label="Theme">
+      <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <button class="icon-btn" id="setBtn" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+<main>
+
+  <section class="card c12" aria-labelledby="h-over">
+    <h2 id="h-over"><span data-i18n="overview"></span><span class="badge" id="devBadge"><i></i><span id="devText"></span></span></h2>
+    <div class="stats">
+      <div class="stat"><small data-i18n="relay"></small><b id="vRelay">–</b></div>
+      <div class="stat"><small data-i18n="led"></small><b id="vLed">–</b></div>
+      <div class="stat"><small data-i18n="uptime"></small><b id="vUp">–</b></div>
+      <div class="stat"><small data-i18n="lastUpdate"></small><b id="vLast">–</b></div>
+    </div>
+  </section>
+
+  <section class="card c7" aria-labelledby="h-ctrl">
+    <h2 id="h-ctrl"><span data-i18n="control"></span><span class="badge" id="lockBadge" hidden></span></h2>
+    <div class="ctrl">
+      <div><h3 data-i18n="relay"></h3><p data-i18n="relayDesc"></p></div>
+      <label class="switch"><input type="checkbox" id="swRelay" aria-label="relay" disabled><span></span></label>
+    </div>
+    <div class="ctrl">
+      <div><h3 data-i18n="led"></h3><p data-i18n="ledDesc"></p></div>
+      <label class="switch"><input type="checkbox" id="swLed" aria-label="led" disabled><span></span></label>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" id="bOn" disabled data-i18n="relayOnBtn"></button>
+      <button class="btn" id="bOff" disabled data-i18n="relayOffBtn"></button>
+    </div>
+    <div class="notice" id="waitNote" data-i18n="waitNote"></div>
+  </section>
+
+  <section class="card c5" aria-labelledby="h-sig">
+    <h2 id="h-sig" data-i18n="signal"></h2>
+    <div class="sigtop">
+      <div><b id="vRssi">–</b> <span>dBm</span><br><span id="vQual">–</span></div>
+      <div class="sig" id="sigBars"><i></i><i></i><i></i><i></i></div>
+    </div>
+    <svg class="spark" id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="0" y1="35" x2="300" y2="35"/>
+      <path id="sparkArea" d=""/><polyline id="sparkLine" points=""/>
+    </svg>
+  </section>
+
+  <section class="card c12" aria-labelledby="h-log">
+    <h2 id="h-log"><span data-i18n="log"></span>
+      <span class="tools">
+        <button class="btn sm" id="bExport" data-i18n="export"></button>
+        <button class="btn sm danger" id="bClear" data-i18n="clear"></button>
+      </span>
+    </h2>
+    <ul class="log" id="logList"></ul>
+  </section>
+
+</main>
+</div>
+
+<footer><div class="wrap"><span data-i18n="footer"></span></div></footer>
+
+<!-- settings -->
+<dialog id="dlgSet">
+  <form method="dialog" id="formSet">
+    <h3 data-i18n="settings"></h3>
+    <div class="field"><label for="fPrefix" data-i18n="prefix"></label><input type="text" id="fPrefix" autocomplete="off"><small data-i18n="prefixHint"></small></div>
+    <div class="field"><label for="fBroker" data-i18n="broker"></label><input type="url" id="fBroker" autocomplete="off"></div>
+    <label class="check"><input type="checkbox" id="fConfirm"><span data-i18n="optConfirm"></span></label>
+    <label class="check"><input type="checkbox" id="fSound"><span data-i18n="optSound"></span></label>
+    <div class="field"><label for="fPin" data-i18n="pin"></label><input type="password" id="fPin" inputmode="numeric" autocomplete="new-password" maxlength="8"><small data-i18n="pinHint"></small></div>
+    <button type="button" class="btn sm" id="bRmPin" hidden data-i18n="rmPin"></button>
+    <div class="actions">
+      <button type="button" class="btn" id="bCancelSet" data-i18n="cancel"></button>
+      <button type="submit" class="btn primary" data-i18n="save" value="ok"></button>
+    </div>
+  </form>
+</dialog>
+
+<!-- PIN -->
+<dialog id="dlgPin">
+  <form method="dialog" id="formPin">
+    <h3 data-i18n="pinTitle"></h3>
+    <div class="field"><input type="password" id="pinIn" inputmode="numeric" autocomplete="off" maxlength="8" aria-label="PIN"><div class="err" id="pinErr"></div></div>
+    <div class="actions">
+      <button type="button" class="btn" id="bPinCancel" data-i18n="cancel"></button>
+      <button type="submit" class="btn primary" data-i18n="unlock"></button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+/* ---------- i18n ---------- */
+const I18N = {
+  th:{
+    title:"ทันเวลา", subtitle:"ศูนย์ควบคุมและตรวจสอบอุปกรณ์", overview:"ภาพรวมอุปกรณ์",
+    relay:"รีเลย์", led:"ไฟ LED", uptime:"เวลาทำงานต่อเนื่อง", lastUpdate:"อัปเดตล่าสุด",
+    control:"การควบคุม", relayDesc:"เปิด-ปิดโหลดที่ต่อกับรีเลย์", ledDesc:"สลับไฟ LED บนบอร์ด",
+    relayOnBtn:"เปิดรีเลย์", relayOffBtn:"ปิดรีเลย์",
+    waitNote:"ระบบจะเปิดให้ควบคุมได้เมื่อได้รับสถานะจากอุปกรณ์",
+    signal:"คุณภาพสัญญาณ Wi-Fi", log:"บันทึกกิจกรรม", export:"ส่งออก CSV", clear:"ล้างบันทึก",
+    emptyLog:"ยังไม่มีกิจกรรม", footer:"ระบบทำงานผ่านโปรโตคอล MQTT · ข้อมูลตั้งค่าเก็บไว้ในเบราว์เซอร์ของท่านเท่านั้น",
+    connOn:"เชื่อมต่อเซิร์ฟเวอร์แล้ว", connOff:"ขาดการเชื่อมต่อ", connWait:"กำลังเชื่อมต่อ…",
+    devOn:"อุปกรณ์ออนไลน์", devOff:"อุปกรณ์ออฟไลน์", devWait:"รอสัญญาณอุปกรณ์",
+    on:"เปิด", off:"ปิด",
+    q4:"ดีมาก", q3:"ดี", q2:"พอใช้", q1:"อ่อน",
+    settings:"ตั้งค่า", prefix:"ชื่อ Topic (Topic prefix)", prefixHint:"ต้องตรงกับค่าในโค้ด ESP32 ทุกตัวอักษร ควรตั้งเป็นชื่อสุ่มที่เดายาก",
+    broker:"ที่อยู่ MQTT Broker (WebSocket)", optConfirm:"ขอการยืนยันก่อนสั่งรีเลย์", optSound:"เสียงแจ้งเตือนเมื่อสถานะเปลี่ยน",
+    pin:"รหัส PIN ป้องกันการกดพลาด (ตัวเลข 4-8 หลัก)", pinHint:"เว้นว่างไว้หากไม่ต้องการเปลี่ยน · PIN นี้ล็อกเฉพาะหน้าเว็บ ไม่ใช่ระบบความปลอดภัยของอุปกรณ์",
+    rmPin:"ลบ PIN", cancel:"ยกเลิก", save:"บันทึก", pinTitle:"กรุณาใส่รหัส PIN", unlock:"ปลดล็อก", pinWrong:"รหัส PIN ไม่ถูกต้อง",
+    locked:"ล็อกด้วย PIN", unlocked:"ปลดล็อกแล้ว",
+    confirmOn:"ยืนยันการเปิดรีเลย์?", confirmOff:"ยืนยันการปิดรีเลย์?",
+    saved:"บันทึกการตั้งค่าแล้ว", pinSet:"ตั้งค่า PIN แล้ว", pinRemoved:"ลบ PIN แล้ว", pinBad:"PIN ต้องเป็นตัวเลข 4-8 หลัก", cleared:"ล้างบันทึกแล้ว",
+    evConn:"เชื่อมต่อเซิร์ฟเวอร์สำเร็จ", evDisc:"ขาดการเชื่อมต่อเซิร์ฟเวอร์",
+    evDevOn:"อุปกรณ์กลับมาออนไลน์", evDevOff:"ไม่ได้รับสัญญาณจากอุปกรณ์",
+    evRelay:"สถานะรีเลย์: ", evLed:"สถานะ LED: ", evSend:"ส่งคำสั่ง: ",
+    cmdRelayOn:"เปิดรีเลย์", cmdRelayOff:"ปิดรีเลย์", cmdLed:"สลับ LED",
+    day:"วัน", hr:"ชม.", min:"นาที", sec:"วินาที", never:"–"
+  },
+  en:{
+    title:"Tan Wela", subtitle:"Device Monitoring & Control Center", overview:"Device Overview",
+    relay:"Relay", led:"LED", uptime:"Uptime", lastUpdate:"Last Update",
+    control:"Controls", relayDesc:"Switch the load connected to the relay", ledDesc:"Toggle the on-board LED",
+    relayOnBtn:"Relay ON", relayOffBtn:"Relay OFF",
+    waitNote:"Controls unlock once the device reports its status.",
+    signal:"Wi-Fi Signal Quality", log:"Activity Log", export:"Export CSV", clear:"Clear Log",
+    emptyLog:"No activity yet", footer:"Powered by MQTT · Settings are stored only in your browser",
+    connOn:"Server connected", connOff:"Disconnected", connWait:"Connecting…",
+    devOn:"Device online", devOff:"Device offline", devWait:"Waiting for device",
+    on:"ON", off:"OFF",
+    q4:"Excellent", q3:"Good", q2:"Fair", q1:"Weak",
+    settings:"Settings", prefix:"Topic prefix", prefixHint:"Must match the ESP32 code exactly. Use a random, hard-to-guess name.",
+    broker:"MQTT broker (WebSocket)", optConfirm:"Ask for confirmation before relay commands", optSound:"Play a sound when status changes",
+    pin:"Safety PIN (4-8 digits)", pinHint:"Leave blank to keep unchanged · This only locks this page; it is not device-level security.",
+    rmPin:"Remove PIN", cancel:"Cancel", save:"Save", pinTitle:"Enter PIN", unlock:"Unlock", pinWrong:"Incorrect PIN",
+    locked:"PIN locked", unlocked:"Unlocked",
+    confirmOn:"Turn the relay ON?", confirmOff:"Turn the relay OFF?",
+    saved:"Settings saved", pinSet:"PIN set", pinRemoved:"PIN removed", pinBad:"PIN must be 4-8 digits", cleared:"Log cleared",
+    evConn:"Connected to server", evDisc:"Disconnected from server",
+    evDevOn:"Device came online", evDevOff:"Lost signal from device",
+    evRelay:"Relay state: ", evLed:"LED state: ", evSend:"Command sent: ",
+    cmdRelayOn:"Relay ON", cmdRelayOff:"Relay OFF", cmdLed:"Toggle LED",
+    day:"d", hr:"h", min:"m", sec:"s", never:"–"
+  }
+};
+
+/* ---------- settings ---------- */
+const DEFAULTS = {prefix:"tanwela-demo-8421", broker:"wss://broker.emqx.io:8084/mqtt", confirm:true, sound:false, lang:"th", theme:"auto", pinHash:""};
+let S = {...DEFAULTS};
+try { Object.assign(S, JSON.parse(localStorage.getItem("tw_settings")||"{}")); } catch(e){}
+const saveS = () => { try{ localStorage.setItem("tw_settings", JSON.stringify(S)); }catch(e){} };
+const $ = id => document.getElementById(id);
+const t = k => (I18N[S.lang]||I18N.th)[k] ?? k;
+
+/* ---------- state ---------- */
+const ST = {relay:null, led:null, rssi:null, uptime:null, last:0, devOnline:null, mqtt:false};
+const OFFLINE_MS = 8000;
+let rssiHist = [];
+let logs = [];
+try { logs = JSON.parse(localStorage.getItem("tw_log")||"[]"); } catch(e){}
+let client = null;
+
+/* ---------- helpers ---------- */
+function toast(msg){ const el=$("toast"); el.textContent=msg; el.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove("show"),2200); }
+function fmtUptime(s){
+  if(s==null) return "–";
+  const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60), x=s%60;
+  if(d) return `${d} ${t("day")} ${h} ${t("hr")}`;
+  if(h) return `${h} ${t("hr")} ${m} ${t("min")}`;
+  if(m) return `${m} ${t("min")} ${x} ${t("sec")}`;
+  return `${x} ${t("sec")}`;
+}
+function clock(ts){ return new Date(ts).toLocaleTimeString(S.lang==="th"?"th-TH":"en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"}); }
+function beep(){
+  if(!S.sound) return;
+  try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain();
+    o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.value=.08; o.start(); o.stop(c.currentTime+.12); }catch(e){}
+}
+async function sha(txt){
+  const b=await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tanwela:"+txt));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+/* ---------- log ---------- */
+function addLog(msg){
+  logs.unshift({ts:Date.now(), msg});
+  logs = logs.slice(0,200);
+  try{ localStorage.setItem("tw_log", JSON.stringify(logs)); }catch(e){}
+  renderLog();
+}
+function renderLog(){
+  const ul=$("logList");
+  if(!logs.length){ ul.innerHTML=`<li class="empty" style="display:block">${t("emptyLog")}</li>`; return; }
+  ul.innerHTML = logs.map(l=>`<li><time>${new Date(l.ts).toLocaleDateString(S.lang==="th"?"th-TH":"en-GB",{day:"2-digit",month:"short"})} ${clock(l.ts)}</time><span>${l.msg.replace(/</g,"&lt;")}</span></li>`).join("");
+}
+$("bClear").onclick=()=>{ logs=[]; try{localStorage.removeItem("tw_log");}catch(e){} renderLog(); toast(t("cleared")); };
+$("bExport").onclick=()=>{
+  const rows=[["datetime","event"],...logs.slice().reverse().map(l=>[new Date(l.ts).toISOString(), l.msg.replace(/"/g,'""')])];
+  const csv="\ufeff"+rows.map(r=>r.map(c=>`"${c}"`).join(",")).join("\r\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  a.download="tanwela-log.csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
+
+/* ---------- render ---------- */
+function setBadge(el, cls){ el.className="badge "+cls; }
+function render(){
+  // connection badge
+  const cb=$("connBadge");
+  if(ST.mqtt){ setBadge(cb,"ok"); $("connText").textContent=t("connOn"); }
+  else if(client && client.reconnecting){ setBadge(cb,"bad"); $("connText").textContent=t("connOff"); }
+  else { setBadge(cb,"warn"); $("connText").textContent=t("connWait"); }
+
+  // device badge
+  const db=$("devBadge");
+  if(ST.devOnline===null){ setBadge(db,"warn"); $("devText").textContent=t("devWait"); }
+  else if(ST.devOnline){ setBadge(db,"ok"); $("devText").textContent=t("devOn"); }
+  else { setBadge(db,"bad"); $("devText").textContent=t("devOff"); }
+
+  // values
+  const r=$("vRelay"), l=$("vLed");
+  r.textContent = ST.relay==null?"–":(ST.relay?t("on"):t("off")); r.className = ST.relay?"on":"off";
+  l.textContent = ST.led==null?"–":(ST.led?t("on"):t("off"));     l.className = ST.led?"on":"off";
+  $("vUp").textContent = fmtUptime(ST.uptime);
+  $("vLast").textContent = ST.last? clock(ST.last) : "–";
+
+  // controls
+  const ready = ST.mqtt && ST.devOnline===true;
+  $("swRelay").disabled=$("swLed").disabled=$("bOn").disabled=$("bOff").disabled=!ready;
+  $("swRelay").checked=!!ST.relay; $("swLed").checked=!!ST.led;
+  $("waitNote").hidden = ready;
+
+  // lock badge
+  const lb=$("lockBadge");
+  if(S.pinHash){ lb.hidden=false; const u=sessionStorage.getItem("tw_unlocked")==="1"; setBadge(lb,u?"ok":"warn"); lb.innerHTML="<i></i>"+(u?t("unlocked"):t("locked")); }
+  else lb.hidden=true;
+
+  // signal
+  const v=ST.rssi;
+  $("vRssi").textContent = v==null?"–":v;
+  let q=0, qt="–";
+  if(v!=null){ q = v>=-55?4 : v>=-67?3 : v>=-75?2 : 1; qt=t("q"+q); }
+  $("vQual").textContent=qt;
+  [...$("sigBars").children].forEach((b,i)=>b.classList.toggle("f", i<q));
+  drawSpark();
+}
+function drawSpark(){
+  if(rssiHist.length<2){ $("sparkLine").setAttribute("points",""); $("sparkArea").setAttribute("d",""); return; }
+  const W=300,H=70, lo=-100, hi=-30, n=rssiHist.length;
+  const pts=rssiHist.map((v,i)=>{ const x=i*(W/(Math.max(n-1,1))); const y=H-((Math.min(hi,Math.max(lo,v))-lo)/(hi-lo))*H; return [x,y]; });
+  $("sparkLine").setAttribute("points", pts.map(p=>p.join(",")).join(" "));
+  $("sparkArea").setAttribute("d", "M"+pts.map(p=>p.join(",")).join(" L")+` L${W},${H} L0,${H} Z`);
+}
+
+/* ---------- static text ---------- */
+function applyLang(){
+  document.documentElement.lang=S.lang;
+  document.querySelectorAll("[data-i18n]").forEach(el=>el.textContent=t(el.dataset.i18n));
+  document.title = S.lang==="th" ? "ทันเวลา · ศูนย์ควบคุมอุปกรณ์" : "Tan Wela · Device Control Center";
+  $("langBtn").textContent = S.lang==="th" ? "EN" : "TH";
+  renderLog(); render();
+}
+function applyTheme(){
+  const root=document.documentElement;
+  if(S.theme==="auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme",S.theme);
+}
+$("langBtn").onclick=()=>{ S.lang=S.lang==="th"?"en":"th"; saveS(); applyLang(); };
+$("themeBtn").onclick=()=>{
+  const dark = (S.theme==="dark") || (S.theme==="auto" && matchMedia("(prefers-color-scheme:dark)").matches);
+  S.theme = dark?"light":"dark"; saveS(); applyTheme();
+};
+
+/* ---------- PIN gate ---------- */
+function requireAuth(){
+  if(!S.pinHash || sessionStorage.getItem("tw_unlocked")==="1") return Promise.resolve(true);
+  return new Promise(res=>{
+    const d=$("dlgPin"); $("pinIn").value=""; $("pinErr").textContent="";
+    d.returnValue=""; d.showModal(); $("pinIn").focus();
+    const done=ok=>{ d.removeEventListener("close",onClose); res(ok); };
+    const onClose=()=>done(d.returnValue==="ok");
+    d.addEventListener("close",onClose);
+  });
+}
+$("formPin").addEventListener("submit", async e=>{
+  e.preventDefault();
+  if(await sha($("pinIn").value)===S.pinHash){ sessionStorage.setItem("tw_unlocked","1"); $("dlgPin").close("ok"); render(); }
+  else { $("pinErr").textContent=t("pinWrong"); $("pinIn").select(); }
+});
+$("bPinCancel").onclick=()=>$("dlgPin").close("cancel");
+
+/* ---------- commands ---------- */
+async function sendCmd(cmd, label, confirmMsg){
+  if(!client||!ST.mqtt) return false;
+  if(confirmMsg && S.confirm && !window.confirm(confirmMsg)) return false;
+  if(!(await requireAuth())) return false;
+  client.publish(S.prefix+"/cmd", cmd);
+  addLog(t("evSend")+label);
+  return true;
+}
+$("bOn").onclick =()=>sendCmd("relay_on", t("cmdRelayOn"), t("confirmOn"));
+$("bOff").onclick=()=>sendCmd("relay_off",t("cmdRelayOff"),t("confirmOff"));
+$("swRelay").addEventListener("click", async e=>{
+  e.preventDefault();                       // รอสถานะจริงจากอุปกรณ์แล้วค่อยเปลี่ยนสวิตช์
+  const want=!ST.relay;
+  await sendCmd(want?"relay_on":"relay_off", want?t("cmdRelayOn"):t("cmdRelayOff"), want?t("confirmOn"):t("confirmOff"));
+});
+$("swLed").addEventListener("click", async e=>{
+  e.preventDefault();
+  await sendCmd("toggle", t("cmdLed"));
+});
+
+/* ---------- settings dialog ---------- */
+$("setBtn").onclick=()=>{
+  $("fPrefix").value=S.prefix; $("fBroker").value=S.broker;
+  $("fConfirm").checked=S.confirm; $("fSound").checked=S.sound;
+  $("fPin").value=""; $("bRmPin").hidden=!S.pinHash;
+  $("dlgSet").showModal();
+};
+$("bCancelSet").onclick=()=>$("dlgSet").close();
+$("bRmPin").onclick=async()=>{ if(await requireAuth()){ S.pinHash=""; sessionStorage.removeItem("tw_unlocked"); saveS(); $("bRmPin").hidden=true; render(); toast(t("pinRemoved")); } };
+$("formSet").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const pin=$("fPin").value.trim();
+  if(pin && !/^\d{4,8}$/.test(pin)){ toast(t("pinBad")); return; }
+  const oldKey=S.prefix+"|"+S.broker;
+  S.prefix=$("fPrefix").value.trim()||DEFAULTS.prefix;
+  S.broker=$("fBroker").value.trim()||DEFAULTS.broker;
+  S.confirm=$("fConfirm").checked; S.sound=$("fSound").checked;
+  if(pin){ S.pinHash=await sha(pin); sessionStorage.setItem("tw_unlocked","1"); }
+  saveS(); $("dlgSet").close(); toast(t("saved"));
+  if(oldKey!==S.prefix+"|"+S.broker){ resetDevice(); connect(); }
+  render();
+});
+
+/* ---------- MQTT ---------- */
+function resetDevice(){ Object.assign(ST,{relay:null,led:null,rssi:null,uptime:null,last:0,devOnline:null}); rssiHist=[]; }
+function connect(){
+  if(client){ try{client.end(true);}catch(e){} client=null; }
+  ST.mqtt=false; render();
+  try{
+    client = mqtt.connect(S.broker,{reconnectPeriod:3000, connectTimeout:8000, clientId:"web-"+Math.random().toString(16).slice(2,10)});
+  }catch(e){ render(); return; }
+  const topic=S.prefix+"/status";
+  client.on("connect",()=>{ ST.mqtt=true; client.subscribe(topic); addLog(t("evConn")); render(); });
+  client.on("close",  ()=>{ if(ST.mqtt) addLog(t("evDisc")); ST.mqtt=false; render(); });
+  client.on("reconnect",render); client.on("error",render);
+  client.on("message",(tp,m)=>{
+    if(tp!==topic) return;
+    let d; try{ d=JSON.parse(m.toString()); }catch(e){ return; }
+    const first = ST.devOnline===null;
+    if(ST.devOnline===false) addLog(t("evDevOn"));
+    if(first) addLog(t("evDevOn"));
+    if(ST.relay!==null && ST.relay!==!!d.relay){ addLog(t("evRelay")+(d.relay?t("on"):t("off"))); beep(); }
+    if(ST.led!==null && ST.led!==!!d.led){ addLog(t("evLed")+(d.led?t("on"):t("off"))); beep(); }
+    ST.relay=!!d.relay; ST.led=!!d.led; ST.rssi=d.rssi; ST.uptime=d.uptime; ST.last=Date.now(); ST.devOnline=true;
+    if(typeof d.rssi==="number"){ rssiHist.push(d.rssi); if(rssiHist.length>60) rssiHist.shift(); }
+    render();
+  });
+}
+// ตรวจว่าอุปกรณ์เงียบไปนานหรือไม่
+setInterval(()=>{
+  if(ST.devOnline===true && Date.now()-ST.last>OFFLINE_MS){ ST.devOnline=false; addLog(t("evDevOff")); render(); }
+},1000);
+
+/* ---------- init ---------- */
+applyTheme(); applyLang(); connect();
+</script>
+</body>
+</html>
